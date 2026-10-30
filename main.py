@@ -1,4 +1,7 @@
-import os, logging, threading, io
+import os
+import logging
+import threading
+import io
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -9,18 +12,20 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
 flask_app = Flask(__name__)
+
 @flask_app.route('/')
-def home(): return "Abdullah-bot Live!"
+def home():
+    return "Abdullah-bot Live!"
 
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.0-flash')
 logging.basicConfig(level=logging.INFO)
 
 SYSTEM_PROMPT = """
-انت خبير ماكينات تريكو STOLL الألمانية.
-جاوب بالعربي باختصار ووضوح.
-اذا انبعتلك صورة: اشرح الخطأ الظاهر على الشاشة واعطي حل.
-اذا انبعتلك سؤال كتابة: جاوب كخبير صيانة STOLL.
+انت خبير ماكينات STOLL الألمانية.
+جاوب دائما بالعربي.
+اذا في صورة فيها STOP او Critical Application Error او Master fatal error
+اشرح انو خطأ فادح بالماستر وبدو ريستارت ومسح اللوغات.
 """
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39,13 +44,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.chat.send_action("typing")
         q = update.message.text
-        res = model.generate_content(SYSTEM_PROMPT + f"\nسؤال المستخدم: {q}")
+        res = model.generate_content(SYSTEM_PROMPT + f"\nسؤال: {q}")
         await update.message.reply_text(res.text)
     except Exception as e:
         await update.message.reply_text(f"خطأ: {e}")
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أهلا! أنا بوت Abdullah-bot 🤖\n\n📸 ابعت صورة شاشة ماكينة STOLL\n💬 أو اسألني أي سؤال عن المكنات\n\nمثال: شو يعني خطأ Yarn break؟")
+    await update.message.reply_text("أهلا! بوت Abdullah-bot شغال 🤖\nابعت صورة شاشة ماكينة STOLL أو اسألني أي سؤال")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
