@@ -1,4 +1,4 @@
-import os, threading, io, logging
+import os, threading, io, logging, time
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
@@ -23,12 +23,32 @@ def get_keyboard():
     return InlineKeyboardMarkup(buttons)
 
 def ask_gemini(text, machine_type, img=None):
-    prompt = f"انت خبير صيانة STOLL. نوع الماكينة: {machine_type}. جاوب باختصار سبب + حل من سطرين فقط. سؤال: {text}"
+    prompt = f"انت خبير صيانة STOLL. نوع الماكينة: {machine_type}. جاوب باختصار سبب + حل من سطرين. سؤال: {text}"
     contents = [prompt]
     if img:
         contents.append(img)
-    resp = client.models.generate_content(model="gemini-3.8-flash", contents=contents)
-    return resp.text
+
+    # جرب 3 موديلات - اذا واحد مضغوط جرب الثاني
+    models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.0-flash"]
+    
+    for model_name in models:
+        try:
+            resp = client.models.generate_content(model=model_name, contents=contents)
+            return resp.text
+        except Exception as e:
+            err = str(e)
+            # اذا ضغط عالي 503 جرب الموديل التالي
+            if "503" in err or "UNAVAILABLE" in err or "high demand" in err:
+                time.sleep(1)
+                continue
+            # اذا 404 جرب التالي
+            if "404" in err:
+                continue
+            # اذا اخر موديل فشل ارجع الخطأ
+            if model_name == models[-1]:
+                return f"السيرفر مضغوط هلا، جرب بعد دقيقة 🙏\n(جربت: {model_name})"
+
+    return "السيرفر مضغوط حاليا - جرب بعد 30 ثانية"
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("أهلا 🤖 اختر نوع ماكينتك:", reply_markup=get_keyboard())
@@ -41,35 +61,29 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("اختار النوع الجديد:", reply_markup=get_keyboard())
         return
     context.user_data['machine_type'] = machine
-    await query.edit_message_text(f"✅ تم اختيار: {machine}\n\nهلا ابعت صورة الشاشة أو اسأل: كيف نزل رسمه؟")
+    await query.edit_message_text(f"✅ تم اختيار: {machine}\n\nهلا ابعت صورة الشاشة أو اسأل: كيف نزل رسمه؟\n\n/start لتغيير النوع")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        machine = context.user_data.get('machine_type', 'عام')
-        if not machine or machine == "عام" and not context.user_data:
-             await update.message.reply_text("اختار نوع الماكينة أول شي:", reply_markup=get_keyboard())
-             return
-        await update.message.chat.send_action("typing")
-        f = await context.bot.get_file(update.message.photo[-1].file_id)
-        bio = io.BytesIO()
-        await f.download_to_memory(bio)
-        img = Image.open(bio)
-        ans = ask_gemini("حللي الصورة", machine, img)
-        await update.message.reply_text(ans)
-    except Exception as e:
-        await update.message.reply_text(f"خطأ: {e}")
+    machine = context.user_data.get('machine_type')
+    if not machine:
+        await update.message.reply_text("اختار نوع الماكينة أول شي:", reply_markup=get_keyboard())
+        return
+    await update.message.chat.send_action("typing")
+    f = await context.bot.get_file(update.message.photo[-1].file_id)
+    bio = io.BytesIO()
+    await f.download_to_memory(bio)
+    img = Image.open(bio)
+    ans = ask_gemini("حللي الصورة", machine, img)
+    await update.message.reply_text(ans)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        machine = context.user_data.get('machine_type')
-        if not machine:
-            await update.message.reply_text("اختار نوع الماكينة أول شي:", reply_markup=get_keyboard())
-            return
-        await update.message.chat.send_action("typing")
-        ans = ask_gemini(update.message.text, machine)
-        await update.message.reply_text(ans)
-    except Exception as e:
-        await update.message.reply_text(f"خطأ: {e}")
+    machine = context.user_data.get('machine_type')
+    if not machine:
+        await update.message.reply_text("اختار نوع الماكينة أول شي:", reply_markup=get_keyboard())
+        return
+    await update.message.chat.send_action("typing")
+    ans = ask_gemini(update.message.text, machine)
+    await update.message.reply_text(ans)
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
